@@ -1,35 +1,32 @@
 #!/usr/bin/env python3
+""" Redis Module """
 
-import requests
-import time
 from functools import wraps
+import redis
+import requests
+from typing import Callable
 
-cache = {}
+redis_ = redis.Redis()
 
-def get_page(url: str) -> str:
-    
-    if url in cache and time.time() - cache[url]['timestamp'] < 10:
-        cache[url]['count'] += 1
-        return cache[url]['content']
 
-    response = requests.get(url)
-    content = response.text
-
-    cache[url] = {'content': content, 'count': 1, 'timestamp': time.time()}
-
-    return content
-
-def cache_decorator(func):
-    cache = {}
-
-    @wraps(func)
-    def wrapper(url):
-        if url in cache and time.time() - cache[url]['timestamp'] < 10:
-            cache[url]['count'] += 1
-            return cache[url]['content']
-
-        response = func(url)
-        cache[url] = {'content': response, 'count': 1, 'timestamp': time.time()}
-        return response
+def count_requests(method: Callable) -> Callable:
+    """ Decortator for counting """
+    @wraps(method)
+    def wrapper(url):  # sourcery skip: use-named-expression
+        """ Wrapper for decorator """
+        redis_.incr(f"count:{url}")
+        cached_html = redis_.get(f"cached:{url}")
+        if cached_html:
+            return cached_html.decode('utf-8')
+        html = method(url)
+        redis_.setex(f"cached:{url}", 10, html)
+        return html
 
     return wrapper
+
+
+@count_requests
+def get_page(url: str) -> str:
+    """ Obtain the HTML content of a  URL """
+    req = requests.get(url)
+    return req.text
